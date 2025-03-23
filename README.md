@@ -36,4 +36,4 @@ A modern Android trivia game demonstrating efficient state management, asynchron
 ---
 
 ## Demo
-![Demo](https://i.imgur.com/SMWqgOR.gif)
+https://github.com/user-attachments/assets/9cce8997-a0f1-46ca-84c4-b4c17114d0df
