@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">Trivia Game</string>
+    <string name="time_is_up">Time is up</string>
+    <string name="game_over">Game over</string>
+    <string name="re_match">Re match</string>
+    <string name="done">done</string>
+    <string name="waiting_room">Waiting Room</string>
+    <string name="share_this_link">Share this link:</string>
+    <string name="copy_link">Copy Link</string>
+    <string name="cancel">cancel</string>
+</resources>
