@@ -17,8 +17,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.URL
@@ -39,13 +41,7 @@ class GameViewModel @Inject constructor(
             println("fetched profile ${it.toString()}")
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, Profile())
-//    init {
-//        viewModelScope.launch {
-//            profile.collectLatest {
-//                println("🔄 Profile updated inside ViewModel: $it")
-//            }
-//        }
-//    }
+
     private val _joinRoomValidate = MutableSharedFlow<GameValidationResult>()
     val joinRoomValidate: SharedFlow<GameValidationResult> = _joinRoomValidate.asSharedFlow()
 
@@ -57,90 +53,74 @@ class GameViewModel @Inject constructor(
             is GameIntent.JoinRoom -> joinRoom(intent.roomId)
             is GameIntent.MakeMove -> makeMove(intent.roomId, intent.playerId, intent.action)
             is GameIntent.ObserveGameState -> observeGameState(intent.roomId)
-            is GameIntent.CreateGameRoom -> createGameRoom(intent.onGameStart) // Handle creating a new game room
+            is GameIntent.CreateGameRoom -> createGameRoom(intent.onGameStart)
         }
     }
 
     private fun validateRoom(roomId: String) {
-        viewModelScope.launch {
-
-            when (val result = gameRepository.validateGame(roomId)) {
-                GameValidationResult.AlreadyStarted -> {
-                    _joinRoomValidate.emit(result)
-                }
-
-                GameValidationResult.NotFound -> {
-                    _joinRoomValidate.emit(result)
-                }
-
-                GameValidationResult.Valid -> {
-                    _joinRoomValidate.emit(result)
-                }
-
-                is GameValidationResult.Error -> {
-                    _joinRoomValidate.emit(result)
-                }
-            }
-            // _joinRoomValidate.emit(true)
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = gameRepository.validateGame(roomId)
+            _joinRoomValidate.emit(result)
         }
     }
 
     private fun observeGameState(roomId: String) {
-        // Cancel any existing job to avoid multiple observers
+        // Cancel any existing job
         gameJob?.cancel()
 
         gameJob = viewModelScope.launch {
-            gameRepository.observeGameState(roomId).collect { newState ->
-                _state.value = newState // Update state with the latest game state from Firebase
-            }
+            gameRepository.observeGameState(roomId)
+                .flowOn(Dispatchers.IO)
+                .collect { newState ->
+                    _state.update { newState }
+                }
         }
     }
 
     private fun joinRoom(roomId: String) {
-        _state.value = _state.value.copy(roomId = roomId)
 
-        viewModelScope.launch {
+        _state.update { it.copy(roomId = roomId) }
+
+        viewModelScope.launch(Dispatchers.IO) {
             gameRepository.updateGameRoom(roomId, profile.value)
-
-            gameRepository.observeGameState(roomId).collect { newState ->
-                _state.value = newState
-            }
+            gameRepository.observeGameState(roomId)
+                .flowOn(Dispatchers.IO)
+                .collect { newState ->
+                    withContext(Dispatchers.Main) {
+                        _state.update { newState }
+                    }
+                }
         }
     }
 
     private fun makeMove(roomId: String, playerId: String, action: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             gameRepository.makeMove(roomId, playerId, action)
         }
     }
 
     private fun createGameRoom(onGameStart: (String) -> Unit) {
-
-        viewModelScope.launch {
-            val roomId =
-                UUID.randomUUID().toString().take(6) // Generate a short random ID
+        viewModelScope.launch(Dispatchers.IO) {
+            val roomId = UUID.randomUUID().toString().take(6)
             withContext(Dispatchers.Main) {
                 onGameStart(roomId)
             }
+            gameRepository.createGameRoom(roomId, profile.value)
 
-            gameRepository.createGameRoom(
-                roomId,
-                profile.value
-            ) // Create the room in the repository
-            _state.value =
-                _state.value.copy(roomId = roomId) // Update the state with the new room ID
-
+            withContext(Dispatchers.Main) {
+                _state.update { it.copy(roomId = roomId) }
+            }
         }
     }
 
     fun gameStarted() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             gameRepository.startGame(_state.value.roomId)
         }
     }
 
     fun onBack() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             gameRepository.onBack(_state.value.roomId, profile.value)
         }
     }
@@ -153,7 +133,7 @@ class GameViewModel @Inject constructor(
             try {
                 val response = URL(apiUrl).readText()
                 withContext(Dispatchers.Main) {
-                    callback(response) // Return the shortened URL
+                    callback(response)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
